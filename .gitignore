@@ -1,0 +1,7 @@
+/data/*
+!/data/_
+/htdocs/*
+/htdocs/entry/*
+!/htdocs/entry/_
+/tmp/*
+!/tmp/_
