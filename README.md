@@ -20,6 +20,12 @@ you can use any translate services(e.c. http://translate.google.com/ ).
 全ページのインデクスも生成されます。
 
 
+サンプル
+--------
+
+http://mmotdd.tir.jp/
+
+
 利用方法
 --------
 
