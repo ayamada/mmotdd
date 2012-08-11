@@ -60,6 +60,9 @@
 (define-env-entry "MMOTDD_SRC_URL"
   (lambda _ #t)
   "https://dl.dropbox.com/u/9755436/mmotdd.txt")
+(define-env-entry "MMOTDD_CSS_URL"
+  (lambda _ #t)
+  "http://css.tir.jp/tir.css")
 
 (define-env-entry "WGET_CMD"
   (lambda _ #t)
@@ -193,8 +196,7 @@
     (error "key is null string" mmotdd-entry))
   ;; - コンテンツ本体である文字列を含む事
   ;;;; TODO: あとで
-
-  ;; 既にdbmにエントリがあったら重複なのでエラーを投げる
+  ;; - 既にdbmにエントリがあったら重複なのでエラーを投げる
   (when (dbm-get new-content-dbm (mmotdd-entry->key mmotdd-entry) #f)
     (error "duplicate entry" (mmotdd-entry->key mmotdd-entry)))
   #t)
@@ -264,14 +266,34 @@
           (dbm-db-remove <fsdbm> old-dbm-path))))))
 
 
-(define (make-entry-html mmotdd-entry state-dbm)
-  ;; TODO: テンプレート分離できるようにしたい、が…
-  (html:html
-    (html:head
-      )
-    (html:body
-      (render-html (mmotdd-entry->contents mmotdd-entry))
-      )))
+(define (get-rss-url)
+  (string-append (read-config "MMOTDD_ROOT_URL") "mmotdd.rss"))
+
+(define (make-html html-body . keywords)
+  (list
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+    (html-doctype :type :xhtml-1.0-transitional)
+    (html:html
+      (html:head
+        (html:meta :http-equiv "Content-Type" :content "text/html; charset=utf-8")
+        (html:meta :http-equiv "Content-Style-Type" :content "text/css")
+        ;(html:meta :http-equiv "Content-Script-Type" :content "text/javascript")
+        (html:meta :name "ROBOTS" :content "INDEX,FOLLOW")
+        (html:link :rel "alternate" :type "application/rss+xml" :title "RSS 2.0" :href (get-rss-url))
+        (html:link :rel "Stylesheet" :media "screen" :type "text/css" :href (read-config "MMOTDD_CSS_URL") :title "default")
+        (html:title (html-escape-string (read-config "MMOTDD_TITLE"))))
+      (html:body
+        html-body
+        (html:hr)
+        (html:address
+          :style "text-align:right; font-size: 0.8em"
+          "distributed by "
+          (html:a :href (read-config "MMOTDD_ROOT_URL")
+                  :target "_top"
+                  (html-escape-string (read-config "MMOTDD_TITLE")))
+          "."
+          )))))
+
 
 (define (update-entry-html! state-dbm)
   ;; TODO: 既にhtmlが生成されており、しかも生成された内容と全く同一の場合は
@@ -286,18 +308,18 @@
           (with-output-to-file
             (format "~a/entry/~a.html" (read-config "HTDOCSDIR") key)
             (lambda ()
-              (write-tree (make-entry-html mmotdd-entry state-dbm)))))))))
+              (write-tree
+                (make-html (render-html mmotdd-entry state-dbm))))))))))
 
 (define (update-index-html! state-dbm)
   (with-content-dbm
     (lambda (content-dbm)
       (with-output-to-file
-        (format "~a/entries.html" (read-config "HTDOCSDIR"))
+        (format "~a/entry/index.html" (read-config "HTDOCSDIR"))
         (lambda ()
           (write-tree
-            ;; TODO: あとで
-            "まだだよ！ごめんね"
-            ))))))
+            (make-html
+              (render-index-html content-dbm state-dbm))))))))
 
 (define (format-rss-title date)
   (format
@@ -310,8 +332,7 @@
 
 
 (define *url-rx* #/https?:\/\/(\/\/[^\/?#\s]*)?([^?#\s\"]*(\?[^#\s\"]*)?(#[^\s\"]*)?)/)
-(define (render-html entry-contents)
-  ;; ↑の entry-contents は、ある一つのentry内の全てのcontent文字列のリスト。
+(define (render-html mmotdd-entry state-dbm)
   (define (safe-text str)
     (let next ((result '())
                (left str))
@@ -328,34 +349,126 @@
           (next
             (cons (html-escape-string left) result)
             "")))))
+  (define (text->html str)
+    ;; ここで、strのhtml化を行う。以下の変換を全て同時に行う。
+    ;; - urlの自動リンク化(↓で行う)
+    ;; - 空白の&nbsp;化(safe-textで行う)
+    ;; - html-escape-string(safe-textで行う)
+    (let next ((result '())
+               (left str))
+      (cond
+        ((equal? "" left) (reverse result))
+        ((*url-rx* left) => (lambda (m)
+                              (next
+                                (list*
+                                  (html:a
+                                    :href (m)
+                                    :target "_blank"
+                                    (html-escape-string (m)))
+                                  (safe-text (m 'before))
+                                  result)
+                                (m 'after))))
+        (else
+          (next
+            (cons (safe-text left) result)
+            "")))))
 
-  (html:p
-    (intersperse
-      (html:br)
-      (map
-        (lambda (line)
-          ;; ここで、lineのhtml化を行う。以下の変換を全て同時に行う。
-          ;; - urlの自動リンク化(↓で行う)
-          ;; - 空白の&nbsp;化(safe-textで行う)
-          ;; - html-escape-string(safe-textで行う)
-          (let next ((result '())
-                     (left line))
-            (cond
-              ((equal? "" left) (reverse result))
-              ((*url-rx* left) => (lambda (m)
-                                    (next
-                                      (list*
-                                        (html:a
-                                          :href (m)
-                                          (html-escape-string (m)))
-                                        (safe-text (m 'before))
-                                        result)
-                                      (m 'after))))
-              (else
-                (next
-                  (cons (safe-text left) result)
-                  "")))))
-        entry-contents))))
+  (let ((entry-contents (mmotdd-entry->contents mmotdd-entry))
+        (remarks (mmotdd-entry->remarks mmotdd-entry))
+        )
+    (list
+      ;; :deliverable?フラグの表示
+      (if (mmotdd-entry->deliverable? mmotdd-entry)
+        '()
+        (html:div
+          :style "text-align:center; font-size:0.9em"
+          "(このエントリは現在、配信選択されない設定にされています)"))
+      ;; 本文
+      (html:div
+        :style "border:double medium black; margin:0.5em; padding:0.5em; font-size: 1.1em"
+        (intersperse
+          (html:br)
+          (map
+            (lambda (line)
+              (text->html line))
+            entry-contents)))
+      ;; 備考欄をつける
+      (if (equal? "" remarks)
+        '()
+        (html:div
+          :style "text-align:right; font-size: 0.8em"
+          "("
+          (text->html remarks)
+          ")"
+          ))
+      ;; エントリ登録日時/エントリ更新日時をつける
+      ;; TODO: あとで
+      ;; permalinkをつける
+      (html:div
+        :style "text-align:right; font-size: 0.8em"
+        (html:a
+          :href (get-entry-url mmotdd-entry)
+          :target "_top"
+          "permalink"))
+      )))
+
+(define (render-index-html content-dbm state-dbm)
+  (list
+    (html:h1
+      (html-escape-string (read-config "MMOTDD_TITLE"))
+      "のエントリ一覧")
+    (html:div
+      (html:a
+        :href (read-config "MMOTDD_ROOT_URL")
+        "戻る"))
+    (html:table
+      :style "border:double medium black; margin:0.2em; padding:0.2em"
+      :border "1"
+      (html:tr
+        (html:th "固有キー")
+        (html:th "本文抜粋")
+        (html:th "備考抜粋")
+        (html:th "配信選択")
+        (html:th "登録日時")
+        (html:th "更新日時")
+        ;(html:th "")
+        )
+      (filter-map
+        (lambda (key)
+          (let* ((mmotdd-entry (dbm-get content-dbm key))
+                 (key (mmotdd-entry->key mmotdd-entry))
+                 (url (get-entry-url mmotdd-entry))
+                 )
+            (define (abstract str)
+              (if (< 20 (string-length str))
+                (string-append (substring str 0 16) "...")
+                str))
+
+            (if (equal? "" key)
+              #f
+              (html:tr
+                (html:td
+                  (html:code
+                    (html:a :href url (html-escape-string key))))
+                (html:td (html-escape-string
+                           (abstract
+                             (apply string-append
+                                    (mmotdd-entry->contents mmotdd-entry)))))
+                (html:td (html-escape-string
+                           (abstract (mmotdd-entry->remarks mmotdd-entry))))
+                (html:td (if (mmotdd-entry->deliverable? mmotdd-entry)
+                           (html:span :style "color:blue" "配信可能")
+                           (html:span :style "color:red" "配信不可")))
+                (html:td "(未実装)")
+                (html:td "(未実装)")
+                ))))
+        (sort
+          (dbm-map content-dbm (lambda (k v) k)))))
+    (html:div
+      (html:a
+        :href (read-config "MMOTDD_ROOT_URL")
+        "戻る"))
+    ))
 
 (define (render-rss entry-contents)
   ;; RSS2.0の仕様について調べたが、descriptionの中身は
@@ -369,6 +482,13 @@
         ;; NB 他にも整形処理を入れてよい
         (html-escape-string line))
       entry-contents)))
+
+(define (get-entry-url mmotdd-entry)
+  (string-append
+    (read-config "MMOTDD_ROOT_URL")
+    "entry/"
+    (mmotdd-entry->key mmotdd-entry)
+    ".html"))
 
 (define (make-rss entries state-dbm)
   (let ((e/title (html-escape-string (read-config "MMOTDD_TITLE")))
@@ -387,30 +507,25 @@
       "<lastBuildDate>" ,e/builddate "</lastBuildDate>\n"
       ,(map
          (lambda (e)
-           (let1 entry-url (string-append
-                             (read-config "MMOTDD_ROOT_URL")
-                             "entry/"
-                             (mmotdd-entry->key e)
-                             ".html")
-             (list
-               " <item>\n"
-               "   <title>"
-               (html-escape-string (format-rss-title (current-date)))
-               "</title>\n"
-               "   <description>"
-               (render-rss (mmotdd-entry->contents e))
-               "</description>\n"
-               "   <link>"
-               (html-escape-string entry-url)
-               "</link>\n"
-               "   <guid>"
-               (html-escape-string entry-url)
-               "</guid>\n"
-               "   <pubDate>" ; これはuniqueである必要がある？(sort順に影響？)
-               (html-escape-string (make-rss-date (current-date)))
-               "</pubDate>\n"
-               " </item>\n"
-               )))
+           (list
+             " <item>\n"
+             "   <title>"
+             (html-escape-string (format-rss-title (current-date)))
+             "</title>\n"
+             "   <description>"
+             (render-rss (mmotdd-entry->contents e))
+             "</description>\n"
+             "   <link>"
+             (html-escape-string (get-entry-url e))
+             "</link>\n"
+             "   <guid>"
+             (html-escape-string (get-entry-url e))
+             "</guid>\n"
+             "   <pubDate>" ; これはuniqueである必要がある？(sort順に影響？)
+             (html-escape-string (make-rss-date (current-date)))
+             "</pubDate>\n"
+             " </item>\n"
+             ))
          entries)
       "</channel>\n"
       "</rss>")))
