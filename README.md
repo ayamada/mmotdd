@@ -1,7 +1,7 @@
 My MOTD Distributor
 ===================
 
-sorry, almost this site written in japanese.
+sorry, most this site written in japanese.
 you can use any translate services(e.c. http://translate.google.com/ ).
 
 概要
