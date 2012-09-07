@@ -518,15 +518,15 @@
              "   <link>"
              (html-escape-string (get-entry-url e))
              "</link>\n"
-             ;"   <guid>"
-             ;(html-escape-string (get-entry-url e))
-             ;"</guid>\n"
+             "   <GUID>"
+             (html-escape-string
+               (string-append (get-entry-url e) "#" (x->string (sys-time))))
+             "</GUID>\n"
              ;; GUIDについて：
              ;; - mmotddは同じメッセージを複数回フィードする事が前提の
              ;;   システムだが、GUIDが同じだと「既に投稿されている」判定が
              ;;   なされて通知されないrssリーダーがある。
-             ;;   それを避ける為にGUIDをコメントアウトする。
-             ;;   (毎回違うGUIDにしてもいいが、それはそれで混乱しそうなので)
+             ;;   それを避ける為に、毎回違うGUIDを生成する。
              ;;   GUID等についての詳細は以下を参考にした。
              ;;   http://www.futomi.com/lecture/japanese/rss20.html#hrelementsOfLtitemgt
              "   <pubDate>" ; これはsort順に影響するらしい？
