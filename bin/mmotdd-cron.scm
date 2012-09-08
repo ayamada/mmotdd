@@ -323,7 +323,7 @@
 
 (define (format-rss-title date)
   (format
-    (date->string date "~~aより、~m月~e日~H時~M分に配信")
+    (date->string date "~~aより、~m月~d日~H時~M分に配信")
     (read-config "MMOTDD_TITLE")))
 
 (define (make-rss-date date)
