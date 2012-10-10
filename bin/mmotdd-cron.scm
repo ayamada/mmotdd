@@ -17,6 +17,7 @@
 
 (use srfi-1)
 (use file.util)
+(use gauche.fcntl)
 (use dbm.fsdbm)
 (use gauche.process)
 (use util.digest)
@@ -90,6 +91,18 @@
     ;; TODO: ディレクトリかどうか等のチェックを行う事
     #t)
   (format "~a/../tmp" (get-script-dir)))
+
+(define-env-entry "LOCKFILE"
+  (lambda (path)
+    ;; TODO: チェック
+    #t)
+  (format "~a/../tmp/mmotdd.lock" (get-script-dir)))
+
+(define-env-entry "INTERVAL_SEC"
+  (lambda (sec)
+    ;; TODO: 数値かどうか等のチェックを行う事
+    #t)
+  (* 24 60 60))
 
 
 
@@ -682,11 +695,41 @@
   ;; TODO: あとでちゃんとチェックするコードを書く
   #t)
 
+(define (with-lock/block thunk)
+  (let ((f-rdlck (make <sys-flock> :type F_RDLCK))
+        (f-wrlck (make <sys-flock> :type F_WRLCK))
+        (f-unlck (make <sys-flock> :type F_UNLCK))
+        (lock-file (read-config "LOCKFILE"))
+        )
+    (define (write-lock path)
+      (let1 p (open-output-file
+                path
+                :if-does-not-exist :create
+                :if-exists :append
+                )
+        (sys-fcntl p F_SETLKW f-wrlck)
+        p))
+    (define (unlock p)
+      (when (output-port? p)
+        (flush p))
+      (sys-fcntl p F_SETLKW f-unlck)
+      (cond
+        ((input-port? p) (close-input-port p))
+        ((output-port? p) (close-output-port p))
+        (else (errorf "cannot unlock ~s" p))))
+
+    (let1 p #f
+      (dynamic-wind
+        (lambda ()
+          (set! p (write-lock lock-file)))
+        thunk
+        (lambda ()
+          (unlock p))))))
+
 (define (main args)
-  ;; TODO: 多重起動を防ぐ必要あり！必須！
   (let/cc return
     (if (all-env-is-ok?)
-      (mmotdd-cron-main)
+      (with-lock/block mmotdd-cron-main)
       (mmotdd-cron-usage)))
   0)
 
