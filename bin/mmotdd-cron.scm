@@ -13,7 +13,6 @@
 
 ;; 全体的なTODOは、README.mdに書きます。
 
-
 (add-load-path "../lib")
 
 (use srfi-1)
@@ -136,7 +135,7 @@
 ;;   <qdbm>
 ;;   :path "/path/to/dbm.file"
 ;;   :rw-mode :read
-;;   :key-convert #f
+;;   :key-convert #t
 ;;   :value-convert #t
 ;;   (lambda (dbm)
 ;;     ;; dbmを使った操作を行う
@@ -221,7 +220,7 @@
     <fsdbm>
     :path (get-content-dbm-path)
     :rw-mode :read
-    :key-convert #f
+    :key-convert #t
     :value-convert #t
     proc))
 
@@ -243,7 +242,7 @@
             <fsdbm>
             :path tmp-dbm-path
             :rw-mode :write
-            :key-convert #f
+            :key-convert #t
             :value-convert #t
             (lambda (new-content-dbm)
               ;; TODO: ファイル内のエントリが0個だった場合もエラーとする
@@ -661,7 +660,7 @@
     <fsdbm>
     :path (get-state-dbm-path)
     :rw-mode :write
-    :key-convert #f
+    :key-convert #t
     :value-convert #t
     (lambda (state-dbm)
       (let1 mmotdd-src-path (make-tmpfilename (string-append
