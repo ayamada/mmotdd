@@ -13,6 +13,7 @@
 
 ;; 全体的なTODOは、README.mdに書きます。
 
+
 (add-load-path "../lib")
 
 (use srfi-1)
@@ -30,6 +31,7 @@
 (use rfc.822)
 
 (use srfi-27)
+(use math.const)
 (random-source-randomize! default-random-source)
 
 ;; alist of (name checker-proc fallback)
@@ -98,7 +100,7 @@
     #t)
   (format "~a/../tmp/mmotdd.lock" (get-script-dir)))
 
-(define-env-entry "INTERVAL_SEC"
+(define-env-entry "INTERVAL_SEC_NORM"
   (lambda (sec)
     ;; TODO: 数値かどうか等のチェックを行う事
     #t)
@@ -631,6 +633,26 @@
     (sys-symlink src-path dst-path)
     #t))
 
+(define (is-update-interval-ok? state-dbm)
+  ;; TODO: この判定はかなり適当で考え直す余地が多い
+  ;;       (厳密にやるなら更新後に「次は何時何分以降に更新」とdbmに保存すべき)
+  (let ((interval-sec
+          (normal-distribution-random
+            :mu (read-config "INTERVAL_SEC_NORM")
+            :sigma (/ (read-config "INTERVAL_SEC_NORM") 2)
+            :min 1
+            :max (* 6 (read-config "INTERVAL_SEC_NORM"))
+            ))
+        (last-update-epoch (dbm-get state-dbm "%last-update-epoch" 0))
+        (now-epoch (sys-time))
+        (now-date (current-date))
+        )
+    (and
+      ;; 0時-8時は更新しないようにする
+      (< 8 (date-hour now-date))
+      ;; 上記での判定結果を返す
+      (< now-epoch (+ last-update-epoch interval-sec)))))
+
 (define (mmotdd-cron-main)
   ;; state-dbmは常時openしておく
   ;; content-dbmは必要な時のみopenして使うようにする
@@ -642,43 +664,94 @@
     :key-convert #f
     :value-convert #t
     (lambda (state-dbm)
-      ;; 必要な処理は以下の通り
       (let1 mmotdd-src-path (make-tmpfilename (string-append
-                                                (read-config "TMPDIR")
-                                                "/mmotdd_src_"))
-        (dynamic-wind
-          (lambda () #t)
-          (lambda ()
-            (print "wget mmotdd.txt")
-            (let1 mmotdd-digest (wget&get-digest mmotdd-src-path)
-              ;; - 現在のdbmの元となったmmotdd.txtとdigest値が違うなら更新処理実行
-              (when (digest-is-not-match? state-dbm mmotdd-digest)
-                (print "mmotdd.txt is modified.")
-                (print "updating static html ...")
-                ;; content-dbmと、state-dbm内のdigestを更新
-                (update-content-dbm! state-dbm mmotdd-src-path mmotdd-digest)
-                ;; dbmから静的htmlを再生成
-                (update-entry-html! state-dbm)
-                (update-index-html! state-dbm)
-                (print "done."))))
-          (lambda ()
-            (sys-unlink mmotdd-src-path))))
-      ;; rssを更新するか判定
-      (when (can-update-rss? state-dbm)
-        (print "new entry found.")
-        (let* ((new-entry (choose-new-entry state-dbm))
-               (new-entries (merge-entry state-dbm new-entry)))
-          ;; htmlを更新する
-          (print "updating latest html ...")
-          (update-latest-html! new-entries state-dbm)
-          (print "done.")
-          ;; rssを更新する
-          (print "updating latest rss ...")
-          (update-latest-rss! new-entries state-dbm)
-          (print "done.")
-          ))
-      (print "all done."))))
+                                                 (read-config "TMPDIR")
+                                                 "/mmotdd_src_"))
+        ;; まず更新処理を実行するかどうかの判定を行う
+        (if (is-update-interval-ok? state-dbm)
+          (print "passed by interval.") ; まだ更新から間がないと判定
+          (begin
+            ;; 必要な処理は以下の通り
+            (dynamic-wind
+              (lambda () #t)
+              (lambda ()
+                (print "wget mmotdd.txt")
+                (let1 mmotdd-digest (wget&get-digest mmotdd-src-path)
+                  ;; - 現在のdbmの元となったmmotdd.txtとdigest値が違うなら更新処理実行
+                  (when (digest-is-not-match? state-dbm mmotdd-digest)
+                    (print "mmotdd.txt is modified.")
+                    (print "updating static html ...")
+                    ;; content-dbmと、state-dbm内のdigestを更新
+                    (update-content-dbm! state-dbm mmotdd-src-path mmotdd-digest)
+                    ;; dbmから静的htmlを再生成
+                    (update-entry-html! state-dbm)
+                    (update-index-html! state-dbm)
+                    (dbm-put! state-dbm "%mmotdd-src-digest" mmotdd-digest)
+                    (print "done."))))
+              (lambda ()
+                (sys-unlink mmotdd-src-path)))
+            ;; rssを更新するか判定
+            (when (can-update-rss? state-dbm)
+              (print "new entry found.")
+              (let* ((new-entry (choose-new-entry state-dbm))
+                     (new-entries (merge-entry state-dbm new-entry)))
+                ;; htmlを更新する
+                (print "updating latest html ...")
+                (update-latest-html! new-entries state-dbm)
+                (print "done.")
+                ;; rssを更新する
+                (print "updating latest rss ...")
+                (update-latest-rss! new-entries state-dbm)
+                (print "done.")
+                ))
+            ;; タイムスタンプ更新
+            (dbm-put! state-dbm "%last-update-epoch" (sys-time))
+            (print "all done.")))))))
 
+
+(define (normal-distribution-random . keywords)
+  ;; note: この関数は二つの正規乱数を多値で返す。
+  ;;       (一つしか必要ない場合は片方は適当に捨てれば良い)
+  ;;       キーワード引数は以下の通り。
+  (let-keywords* keywords (
+                           (sigma 1) ; 分散度を指定。
+                           ;; sigmaが大きいと平均的に分散し、
+                           ;; sigmaが0に近いとmu近辺しか出なくなる。
+                           (sigma-plus #f) ; +方向と-方向で、sigmaの値を
+                           (sigma-minus #f) ; 変更したい場合に個別に指定する。
+                           ;; 尚、sigma-plusかsigma-minusにマイナスの値を
+                           ;; 指定する事で、半分に折り返した正規分布を
+                           ;; 作る事も可能。
+                           (mu 0) ; 一番出やすい期待値(平均の中央)を指定。
+                           (clamp-min :min #f) ; 結果をclampする場合に指定
+                           (clamp-max :max #f) ; 結果をclampする場合に指定
+                           )
+    ;; 「（0, 1］」の乱数を二つ用意する
+    ;; TODO: 今には「(0, 1)」になっている、が面倒なのでこれで通す
+    (define get-r random-real)
+    (let ((alpha (get-r))
+          (beta (get-r)))
+      ;; 以下の計算を行う事で、二つの相関の無い正規乱数が得られる。
+      ;; ((-2 * log(α))^0.5) * sin(2 * PI * β)
+      ;; ((-2 * log(α))^0.5) * cos(2 * PI * β)
+      ;; 左辺(result-alpha-part)と、sin/cosの中味(result-beta-part)を先に求める
+      (let ((result-alpha-part (expt
+                                 (* -2 (log alpha))
+                                 0.5))
+            (result-beta-part (* 2 pi beta)))
+        ;; 二つの正規乱数を得る。
+        (let ((result1 (* result-alpha-part (sin result-beta-part)))
+              (result2 (* result-alpha-part (cos result-beta-part))))
+          ;; 上記二つの正規乱数を加工して返す
+          (define (post-process r)
+            (clamp
+              (+ mu
+                 (* r (or
+                        (if (positive? r) sigma-plus sigma-minus)
+                        sigma)))
+              clamp-min
+              clamp-max))
+          (values (post-process result1) (post-process result2)))))))
 
 
 (define (mmotdd-cron-usage)
