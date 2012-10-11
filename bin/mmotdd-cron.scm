@@ -650,7 +650,7 @@
       ;; 0時-8時は更新しないようにする
       (< 8 (date-hour now-date))
       ;; 上記での判定結果を返す
-      (< now-epoch (+ last-update-epoch interval-sec)))))
+      (< (+ last-update-epoch interval-sec) now-epoch))))
 
 (define (mmotdd-cron-main)
   ;; state-dbmは常時openしておく
@@ -667,7 +667,7 @@
                                                  (read-config "TMPDIR")
                                                  "/mmotdd_src_"))
         ;; まず更新処理を実行するかどうかの判定を行う
-        (if (is-update-interval-ok? state-dbm)
+        (if (not (is-update-interval-ok? state-dbm))
           (print "passed by interval.") ; まだ更新から間がないと判定
           (begin
             ;; 必要な処理は以下の通り
