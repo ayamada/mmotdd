@@ -638,7 +638,7 @@
   (let ((interval-sec
           (normal-distribution-random
             :mu (read-config "INTERVAL_SEC_NORM")
-            :sigma (/ (read-config "INTERVAL_SEC_NORM") 2)
+            :sigma (/ (read-config "INTERVAL_SEC_NORM") 4)
             :min 1
             :max (* 6 (read-config "INTERVAL_SEC_NORM"))
             ))
