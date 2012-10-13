@@ -632,25 +632,28 @@
     (sys-symlink src-path dst-path)
     #t))
 
+(define (set-next-update-epoch! state-dbm)
+  (let* ((interval-sec
+           (normal-distribution-random
+             :mu (read-config "INTERVAL_SEC_NORM")
+             :sigma (/ (read-config "INTERVAL_SEC_NORM") 4)
+             :min 1
+             :max (* 6 (read-config "INTERVAL_SEC_NORM"))
+             ))
+         (now (sys-time))
+         (next-update-epoch (+ now interval-sec)))
+    (dbm-put! state-dbm "%last-update-epoch" now)
+    (dbm-put! state-dbm "%next-update-epoch" next-update-epoch)))
 (define (is-update-interval-ok? state-dbm)
-  ;; TODO: この判定はかなり適当で考え直す余地が多い
-  ;;       (厳密にやるなら更新後に「次は何時何分以降に更新」とdbmに保存すべき)
-  (let ((interval-sec
-          (normal-distribution-random
-            :mu (read-config "INTERVAL_SEC_NORM")
-            :sigma (/ (read-config "INTERVAL_SEC_NORM") 4)
-            :min 1
-            :max (* 6 (read-config "INTERVAL_SEC_NORM"))
-            ))
-        (last-update-epoch (dbm-get state-dbm "%last-update-epoch" 0))
+  (let ((next-update-epoch (dbm-get state-dbm "%next-update-epoch" 0))
         (now-epoch (sys-time))
-        (now-date (current-date))
-        )
+        (now-date (current-date)))
     (and
       ;; 0時-8時は更新しないようにする
+      ;; TODO: このチェックは別関数にする事(この名前の関数でやる事ではない)
       (< 8 (date-hour now-date))
-      ;; 上記での判定結果を返す
-      (< (+ last-update-epoch interval-sec) now-epoch))))
+      ;; 判定結果を返す
+      (< next-update-epoch now-epoch))))
 
 (define (mmotdd-cron-main)
   ;; state-dbmは常時openしておく
@@ -704,7 +707,7 @@
                 (print "done.")
                 ))
             ;; タイムスタンプ更新
-            (dbm-put! state-dbm "%last-update-epoch" (sys-time))
+            (set-next-update-epoch! state-dbm)
             (print "all done.")))))))
 
 
