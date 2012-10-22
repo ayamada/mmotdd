@@ -592,11 +592,6 @@
       mmotdd-digest
       (dbm-get state-dbm "%mmotdd-src-digest" #f))))
 
-(define (can-update-rss? state-dbm)
-  ;; TODO: あとでrss更新するか今回はパスするかの判定を実装する事
-  ;; (要は、ここで、ランダム更新のゆらぎを実装する)
-  #t)
-
 (define (choose-new-entry state-dbm)
   (with-content-dbm
     (lambda (content-dbm)
@@ -692,11 +687,11 @@
                     (print "done."))))
               (lambda ()
                 (sys-unlink mmotdd-src-path)))
-            ;; rssを更新するか判定
-            (when (can-update-rss? state-dbm)
-              (print "new entry found.")
-              (let* ((new-entry (choose-new-entry state-dbm))
-                     (new-entries (merge-entry state-dbm new-entry)))
+            ;; rssを更新する
+            (let* ((new-entry (choose-new-entry state-dbm))
+                   (new-entries (merge-entry state-dbm new-entry)))
+              (unless (null? new-entries)
+                (print "new entry found.")
                 ;; htmlを更新する
                 (print "updating latest html ...")
                 (update-latest-html! new-entries state-dbm)
