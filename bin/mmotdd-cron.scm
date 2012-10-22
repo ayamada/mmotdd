@@ -724,7 +724,7 @@
                            (clamp-max :max #f) ; 結果をclampする場合に指定
                            )
     ;; 「（0, 1］」の乱数を二つ用意する
-    ;; TODO: 今には「(0, 1)」になっている、が面倒なのでこれで通す
+    ;; NB: 今には「(0, 1)」になっている、が面倒なのでこれで通す
     (define get-r random-real)
     (let ((alpha (get-r))
           (beta (get-r)))
